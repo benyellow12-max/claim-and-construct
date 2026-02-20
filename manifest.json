@@ -1,0 +1,18 @@
+{
+  "name": "Claim and Construct",
+  "short_name": "C&C",
+  "description": "A real-world map-based strategy game where you build bases on actual buildings",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "background_color": "#1a1a1a",
+  "theme_color": "#2a6ea6",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192'><rect fill='%232a6ea6' width='192' height='192'/><text x='96' y='120' font-size='80' fill='%234a9fd8' text-anchor='middle' font-weight='bold'>C&C</text></svg>",
+      "sizes": "192x192",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}

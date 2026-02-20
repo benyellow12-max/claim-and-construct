@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Claim and Construct - A real-world map-based strategy game">
+    <meta name="theme-color" content="#1a1a1a">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <link rel="manifest" href="manifest.json">
+    <title>Claim and Construct</title>
+    
+    <!-- OpenLayers CSS -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/ol@7.5.1/ol.css" />
+    
+    <!-- Game CSS -->
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div id="game-container">
+        <!-- Map area -->
+        <div id="map"></div>
+        
+        <!-- UI Panels -->
+        <div id="ui-overlay">
+            <!-- Top-left: Player Stats -->
+            <div id="player-stats" class="panel top-left">
+                <div class="panel-header">
+                    <h3>Player Stats</h3>
+                    <button class="panel-minimize" data-target="player-stats" aria-label="Minimize Player Stats">−</button>
+                </div>
+                <div class="panel-body">
+                    <div class="stat">
+                        <span class="label">Level:</span>
+                        <span id="player-level" class="value">1</span>
+                    </div>
+                    <div class="stat">
+                        <span class="label">XP:</span>
+                        <span id="xp" class="value">0 / 100</span>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Top-right: Resources -->
+            <div id="resources-panel" class="panel top-right">
+                <div class="panel-header">
+                    <h3>Resources</h3>
+                    <button class="panel-minimize" data-target="resources-panel" aria-label="Minimize Resources">−</button>
+                </div>
+                <div class="panel-body">
+                    <div class="stat">
+                        <span class="label">Day:</span>
+                        <span id="game-day" class="value">1</span>
+                    </div>
+                    <div class="stat">
+                        <span class="label">Happiness:</span>
+                        <span id="happiness" class="value">70%</span>
+                    </div>
+                    <div class="stat">
+                        <span class="label">Citizens:</span>
+                        <span id="citizens-count" class="value">0</span>
+                    </div>
+                    <div class="stat">
+                        <span class="label">Food:</span>
+                        <span id="food-count" class="value">100</span>
+                    </div>
+                    <div class="stat">
+                        <span class="label">Seeds:</span>
+                        <span id="seeds-count" class="value">20</span>
+                    </div>
+                    <div class="stat">
+                        <span class="label">Scrap:</span>
+                        <span id="scrap-count" class="value">50</span>
+                    </div>
+                    <div class="stat">
+                        <span class="label">Tools:</span>
+                        <span id="tools-count" class="value">0</span>
+                    </div>
+                    <div class="stat">
+                        <span class="label">Soldiers:</span>
+                        <span id="soldiers-count" class="value">0</span>
+                    </div>
+                    <div class="stat">
+                        <span class="label">Religiousness:</span>
+                        <span id="religiousness-count" class="value">0</span>
+                    </div>
+                    <div class="stat">
+                        <span class="label">Beds:</span>
+                        <span id="beds-info" class="value">0/0</span>
+                    </div>
+                    <div class="stat">
+                        <span class="label">Storage:</span>
+                        <span id="storage-info" class="value">0/0</span>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Center-top: Controls -->
+            <div id="controls" class="panel center-top">
+                <div class="panel-header">
+                    <h3>Controls</h3>
+                    <button class="panel-minimize" data-target="controls" aria-label="Minimize Controls">−</button>
+                </div>
+                <div class="panel-body">
+                    <button id="btn-buildings" class="btn">Buildings</button>
+                    <button id="btn-citizens" class="btn">Citizens</button>
+                    <button id="btn-demographics" class="btn">Demographics</button>
+                    <button id="btn-government" class="btn">Government</button>
+                    <button id="btn-locate" class="btn">Locate Me</button>
+                    <button id="btn-zoom-in" class="btn btn-small">Zoom +</button>
+                    <button id="btn-zoom-out" class="btn btn-small">Zoom -</button>
+                </div>
+            </div>
+            
+            <!-- Bottom-left: Base Info -->
+            <div id="base-info" class="panel bottom-left" style="display: none;">
+                <h3>Base Information</h3>
+                <div id="base-details"></div>
+                <button id="btn-build-here" class="btn btn-primary">Build Base</button>
+                <button id="btn-close-base" class="btn">Close</button>
+            </div>
+            
+            <!-- Bottom-center: Building Info -->
+            <div id="building-info" class="panel bottom-center" style="display: none;">
+                <h3>Building Information</h3>
+                <div id="building-details"></div>
+                <div id="building-actions"></div>
+                <button id="btn-close-building" class="btn">Close</button>
+            </div>
+            
+            <!-- Bottom-right: Activity Log -->
+            <div id="activity-log" class="panel bottom-right">
+                <h3>Activity</h3>
+                <div id="log-content"></div>
+            </div>
+            
+            <!-- Citizens Management Modal -->
+            <div id="citizens-modal" class="modal" style="display: none;">
+                <div class="modal-content citizens-modal-content">
+                    <h2>Citizens Management</h2>
+                    <p style="font-size: 13px; color: #a0a0a0; margin-bottom: 12px;">Citizens arrive naturally when happiness is high</p>
+                    <div id="citizens-list" class="list-container"></div>
+                    <button id="btn-close-citizens" class="btn">Close</button>
+                </div>
+            </div>
+            
+            <!-- Buildings Management Modal -->
+            <div id="buildings-modal" class="modal" style="display: none;">
+                <div class="modal-content buildings-modal-content">
+                    <h2>Buildings Management</h2>
+                    <p style="font-size: 13px; color: #a0a0a0; margin-bottom: 12px;">Click on green buildings on the map to claim them</p>
+                    <div id="buildings-list" class="list-container"></div>
+                    <button id="btn-close-buildings" class="btn">Close</button>
+                </div>
+            </div>
+            
+            <!-- Claim OSM Feature Modal -->
+            <div id="claim-building-modal" class="modal" style="display: none;">
+                <div class="modal-content">
+                    <h2 id="claim-modal-title">Claim Location</h2>
+                    <p id="claim-modal-description" style="font-size: 13px; color: #a0a0a0; margin-bottom: 12px;"></p>
+                    <div id="available-buildings" class="list-container"></div>
+                    <button id="btn-close-claim" class="btn">Cancel</button>
+                </div>
+            </div>
+            
+            <!-- Citizen Details Modal -->
+            <div id="citizen-modal" class="modal" style="display: none;">
+                <div class="modal-content">
+                    <h2 id="citizen-modal-title">Citizen Details</h2>
+                    <div id="citizen-details"></div>
+                    <div id="citizen-actions"></div>
+                    <button id="btn-close-citizen" class="btn">Close</button>
+                </div>
+            </div>
+            
+            <!-- Government & Laws Modal -->
+            <div id="government-modal" class="modal" style="display: none;">
+                <div class="modal-content" style="max-width: 600px;">
+                    <h2>Government & Laws</h2>
+                    
+                    <div style="margin: 20px 0;">
+                        <h3 style="color: #4a9fd8; font-size: 16px; margin-bottom: 10px;">Control Level</h3>
+                        <div id="control-options" class="list-container"></div>
+                    </div>
+                    
+                    <div style="margin: 20px 0;">
+                        <h3 style="color: #4a9fd8; font-size: 16px; margin-bottom: 10px;">Religious Policy</h3>
+                        <div id="religion-options" class="list-container"></div>
+                    </div>
+                    
+                    <div style="margin: 20px 0; display: none;" id="job-distribution-section">
+                        <h3 style="color: #4a9fd8; font-size: 16px; margin-bottom: 10px;">Distribute Jobs</h3>
+                        <div id="job-distribution-options" class="list-container"></div>
+                    </div>
+                    
+                    <button id="btn-close-government" class="btn">Close</button>
+                </div>
+            </div>
+            
+            <!-- Demographics Modal -->
+            <div id="demographics-modal" class="modal" style="display: none;">
+                <div class="modal-content" style="max-width: 700px;">
+                    <h2>Population Demographics</h2>
+                    <p style="font-size: 13px; color: #a0a0a0; margin-bottom: 12px;">Total Population: <span id="demo-total">0</span></p>
+                    
+                    <div id="demographics-charts" style="margin: 20px 0;">
+                        <div style="margin-bottom: 20px;">
+                            <h3 style="color: #4a9fd8; font-size: 14px; margin-bottom: 8px;">Age Distribution</h3>
+                            <div id="age-chart" class="demo-chart"></div>
+                        </div>
+                        
+                        <div style="margin-bottom: 20px;">
+                            <h3 style="color: #4a9fd8; font-size: 14px; margin-bottom: 8px;">Gender Distribution</h3>
+                            <div id="gender-chart" class="demo-chart"></div>
+                        </div>
+                        
+                        <div style="margin-bottom: 20px;">
+                            <h3 style="color: #4a9fd8; font-size: 14px; margin-bottom: 8px;">Religious Affiliation</h3>
+                            <div id="religion-chart" class="demo-chart"></div>
+                        </div>
+                        
+                        <div style="margin-bottom: 20px;">
+                            <h3 style="color: #4a9fd8; font-size: 14px; margin-bottom: 8px;">Ethnic Background</h3>
+                            <div id="ethnicity-chart" class="demo-chart"></div>
+                        </div>
+                    </div>
+                    
+                    <button id="btn-close-demographics" class="btn">Close</button>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Modal: Game Setup -->
+        <div id="modal-setup" class="modal">
+            <div class="modal-content civilization-creator">
+                <h2>Create Your Civilization</h2>
+                <p>Build your empire and claim territory on the real world map</p>
+                
+                <div class="creator-section">
+                    <label for="civilization-name">Civilization Name</label>
+                    <input type="text" id="civilization-name" placeholder="e.g., The Northern Alliance" maxlength="30" autofocus>
+                </div>
+                
+                <div class="creator-section">
+                    <label for="civilization-color">Territory Color</label>
+                    <div class="color-picker-container">
+                        <input type="color" id="civilization-color" value="#22c55e">
+                        <span class="color-preview-text">All claimed land will use this color</span>
+                    </div>
+                </div>
+                
+                <div class="creator-section">
+                    <label for="ai-players">AI Civilizations</label>
+                    <div class="ai-player-controls">
+                        <input type="number" id="ai-players" min="0" max="5" value="0" style="width: 80px;">
+                        <span class="color-preview-text">Number of AI players (0-5)</span>
+                    </div>
+                    <p class="ai-description">AI players will compete for territory with free government and random religious policies</p>
+                </div>
+                
+                <div class="color-presets">
+                    <span class="preset-label">Quick colors:</span>
+                    <button class="color-preset" data-color="#22c55e" style="background: #22c55e;" title="Green"></button>
+                    <button class="color-preset" data-color="#3b82f6" style="background: #3b82f6;" title="Blue"></button>
+                    <button class="color-preset" data-color="#ef4444" style="background: #ef4444;" title="Red"></button>
+                    <button class="color-preset" data-color="#f59e0b" style="background: #f59e0b;" title="Orange"></button>
+                    <button class="color-preset" data-color="#8b5cf6" style="background: #8b5cf6;" title="Purple"></button>
+                    <button class="color-preset" data-color="#ec4899" style="background: #ec4899;" title="Pink"></button>
+                    <button class="color-preset" data-color="#14b8a6" style="background: #14b8a6;" title="Teal"></button>
+                    <button class="color-preset" data-color="#eab308" style="background: #eab308;" title="Yellow"></button>
+                </div>
+                
+                <button id="btn-start-game" class="btn btn-primary">Found Civilization</button>
+                <button id="btn-close-setup" class="btn">Cancel</button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- OpenLayers -->
+    <script src="https://cdn.jsdelivr.net/npm/ol@7.5.1/dist/ol.js"></script>
+    
+    <!-- Game Scripts -->
+    <script src="js/config.js"></script>
+    <script src="js/storage.js"></script>
+    <script src="js/map.js"></script>
+    <script src="js/osm.js"></script>
+    <script src="js/resources.js"></script>
+    <script src="js/base.js"></script>
+    <script src="js/buildings.js"></script>
+    <script src="js/citizens.js"></script>
+    <script src="js/game.js"></script>
+</body>
+</html>

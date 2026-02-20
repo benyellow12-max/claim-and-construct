@@ -1,0 +1,11 @@
+{
+    "recommendations": [
+        "ms-vscode.vscode-serial-monitor",
+        "firefox-devtools.vscode-firefox-debug",
+        "ritwickdey.liveserver",
+        "esbenp.prettier-vscode",
+        "dbaeumer.vscode-eslint",
+        "burkeholland.simple-react-snippets",
+        "formulahendry.code-runner"
+    ]
+}

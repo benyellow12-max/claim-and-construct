@@ -1,0 +1,21 @@
+{
+  "name": "claim-and-construct",
+  "version": "1.0.0",
+  "description": "A real-world map-based strategy game where you build bases on actual buildings",
+  "scripts": {
+    "start": "http-server -p 8000 -c-1",
+    "serve": "http-server -p 8000 -o index.html"
+  },
+  "keywords": [
+    "game",
+    "strategy",
+    "map",
+    "openstreetmap",
+    "pwa"
+  ],
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "http-server": "^14.1.1"
+  }
+}
