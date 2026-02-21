@@ -409,7 +409,12 @@ const Game = {
                     actionsHTML += `Upgrade to ${option.name} (Tier ${option.tier}: ${option.scrapCost} scrap, ${option.toolCost} tools)</button>`;
                 });
             } else {
-                actionsHTML += `<div style="margin-top: 8px; font-size: 12px; color: #a0a0a0;">No upgrades available here</div>`;
+                // Check if no upgrades because it's a known house
+                if (Buildings.isKnownHouse(building)) {
+                    actionsHTML += `<div style="margin-top: 8px; font-size: 12px; color: #fbbf24;">⭐ This historic landmark cannot be upgraded</div>`;
+                } else {
+                    actionsHTML += `<div style="margin-top: 8px; font-size: 12px; color: #a0a0a0;">No upgrades available here</div>`;
+                }
             }
         }
         

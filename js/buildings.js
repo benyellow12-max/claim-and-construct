@@ -37,8 +37,31 @@ const Buildings = {
         return found?.tags || null;
     },
 
+    isKnownHouse: (building) => {
+        if (!building || !building.location || !CONFIG.KNOWN_HOUSES) {
+            return false;
+        }
+
+        // Check if building location matches any known house location (within ~0.01 degrees ~1.1 km tolerance)
+        const tolerance = 0.01;
+        const [lon, lat] = building.location;
+
+        return CONFIG.KNOWN_HOUSES.some((knownHouse) => {
+            const [knownLon, knownLat] = knownHouse.location;
+            return (
+                Math.abs(lon - knownLon) < tolerance &&
+                Math.abs(lat - knownLat) < tolerance
+            );
+        });
+    },
+
     getUpgradeOptions: (building) => {
         if (!building) return [];
+
+        // Known houses cannot be upgraded
+        if (Buildings.isKnownHouse(building)) {
+            return [];
+        }
 
         const progression = CONFIG.BUILDING_PROGRESSION || {};
         const upgrades = progression.upgrades || {};
@@ -76,11 +99,13 @@ const Buildings = {
             })
             .map((targetType) => {
                 const tier = Buildings.getBuildingTier(targetType);
+                const tierCosts = CONFIG.UPGRADE_COSTS_BY_TIER || {};
+                const tierCost = tierCosts[tier] || {};
                 return {
                     type: targetType,
                     tier,
-                    scrapCost: tier,
-                    toolCost: tier,
+                    scrapCost: tierCost.scrap ?? (tier * 40),
+                    toolCost: tierCost.tools ?? Math.max(1, Math.ceil(tier * 2.5)),
                     name: CONFIG.BUILDINGS[targetType].name,
                 };
             });
@@ -275,13 +300,18 @@ const Buildings = {
         Storage.setPlayer(player);
 
         const targetDef = CONFIG.BUILDINGS[selected.type];
+        const baseJobSlots = targetDef.jobSlots || 0;
+        const baseStorage = targetDef.storageCapacity || 0;
+        const tierDefenseBonus = (selected.tier - 1) * 35;
+        const tierJobBonus = selected.tier >= 4 ? 1 : 0;
+        const tierStorageBonus = selected.tier >= 3 ? (selected.tier - 2) * 30 : 0;
         const updatedBuilding = {
             ...building,
             type: selected.type,
             level: selected.tier,
-            defense: targetDef.defense ?? building.defense,
-            storage: targetDef.storageCapacity || 0,
-            jobSlots: targetDef.jobSlots || 0,
+            defense: Math.max(building.defense || 0, (targetDef.defense ?? building.defense) + tierDefenseBonus),
+            storage: Math.max(building.storage || 0, baseStorage + tierStorageBonus),
+            jobSlots: Math.max(building.jobSlots || 0, baseJobSlots + tierJobBonus),
             religion: selected.type === 'RELIGIOUS'
                 ? (building.religion || Resources.getPreferredReligion(player, Storage.getCitizens()))
                 : null,
@@ -296,7 +326,7 @@ const Buildings = {
 
         Storage.updateBuilding(buildingId, updatedBuilding);
         Game.addLog(`Upgraded to ${targetDef.name} (Tier ${selected.tier})!`, 'success');
-        Resources.addXP(50);
+        Resources.addXP(40 + (selected.tier * 30));
 
         if (MapManager && MapManager.buildingLayer) {
             MapManager.loadBuildings();
@@ -558,6 +588,10 @@ const Buildings = {
             Type: ${displayName}<br>
             Level: ${building.level}<br>
         `;
+
+        if (Buildings.isKnownHouse(building)) {
+            info += `<span style="color: #fbbf24; font-weight: bold;">⭐ Historic Landmark (Cannot Upgrade)</span><br>`;
+        }
 
         if (building.defense !== undefined) {
             info += `Defense: ${building.defense}<br>`;

@@ -510,9 +510,23 @@ const OSMManager = {
     },
     
     getCompatibleBuildingTypes: (tags) => {
+        const starterTypes = Array.isArray(CONFIG.MAIN_BUILDING_STARTERS)
+            ? CONFIG.MAIN_BUILDING_STARTERS.filter((type) => !!CONFIG.BUILDINGS[type])
+            : [];
         const normalizedBuildingTag = tags.building ? String(tags.building).toLowerCase() : '';
+        const tagRestrictions = CONFIG.OSM_TAG_RESTRICTIONS || {};
+
+        const checkTagRestriction = (tagValue) => {
+            const normalizedValue = String(tagValue).toLowerCase();
+            if (tagRestrictions[normalizedValue]) {
+                return tagRestrictions[normalizedValue];
+            }
+            return null;
+        };
+
         if (normalizedBuildingTag === 'yes') {
-            return Object.keys(CONFIG.BUILDINGS).filter((key) => !CONFIG.BUILDINGS[key].strictOsmMatch);
+            const nonStrictTypes = Object.keys(CONFIG.BUILDINGS).filter((key) => !CONFIG.BUILDINGS[key].strictOsmMatch);
+            return [...new Set([...starterTypes, ...nonStrictTypes])];
         }
 
         const signature = Object.keys(tags)
@@ -524,10 +538,23 @@ const OSMManager = {
             return OSMManager.compatibleTypesCache[signature];
         }
 
+        let restrictedToTypes = null;
+        for (const [tagKey, tagValue] of Object.entries(tags)) {
+            const restriction = checkTagRestriction(tagValue);
+            if (restriction && Array.isArray(restriction) && restriction.length > 0) {
+                restrictedToTypes = restriction;
+                break;
+            }
+        }
+
         const compatible = [];
         
         Object.entries(CONFIG.BUILDINGS).forEach(([key, buildingDef]) => {
-            if (!buildingDef.osmTypes || buildingDef.osmTypes.length === 0) return; // Skip if no OSM types (e.g., farms)
+            if (restrictedToTypes && !restrictedToTypes.includes(key)) {
+                return;
+            }
+
+            if (!buildingDef.osmTypes || buildingDef.osmTypes.length === 0) return;
             
             // Check if any tag matches the building's OSM types
             for (const [tagKey, tagValue] of Object.entries(tags)) {
@@ -540,20 +567,31 @@ const OSMManager = {
                         ? (valueStr === osmType.toLowerCase())
                         : (valueStr.includes(osmType.toLowerCase()) || tagStr.includes(osmType.toLowerCase()))
                 )) {
-                    compatible.push(key);
+                    if (!restrictedToTypes || restrictedToTypes.includes(key)) {
+                        compatible.push(key);
+                    }
                     break;
                 }
             }
         });
+
+        const hasClaimableContext = !!(tags.building || tags.amenity || tags.shop || tags.landuse);
+        if (hasClaimableContext && starterTypes.length > 0) {
+            if (!restrictedToTypes || restrictedToTypes.some(t => starterTypes.includes(t))) {
+                compatible.push(...starterTypes.filter(t => !restrictedToTypes || restrictedToTypes.includes(t)));
+            }
+        }
+
+        const dedupedCompatible = [...new Set(compatible)];
         
-        // Default: if it's a building, allow HOUSE HQ or FARM
-        if (compatible.length === 0 && tags.building) {
-            compatible.push('HOUSE');
-            compatible.push('HQ');
+        // Default: if it's a building and no restriction, allow HOUSE HQ or FARM
+        if (dedupedCompatible.length === 0 && tags.building && !restrictedToTypes) {
+            dedupedCompatible.push('HOUSE');
+            dedupedCompatible.push('HQ');
         }
         
-        OSMManager.compatibleTypesCache[signature] = compatible;
-        return compatible;
+        OSMManager.compatibleTypesCache[signature] = dedupedCompatible;
+        return dedupedCompatible;
     },
 
     refreshOwnershipCache: () => {

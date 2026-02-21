@@ -130,8 +130,13 @@
             
             <!-- Bottom-right: Activity Log -->
             <div id="activity-log" class="panel bottom-right">
-                <h3>Activity</h3>
-                <div id="log-content"></div>
+                <div class="panel-header">
+                    <h3>Activity</h3>
+                    <button class="panel-minimize" data-target="activity-log" aria-label="Minimize Activity">−</button>
+                </div>
+                <div class="panel-body">
+                    <div id="log-content"></div>
+                </div>
             </div>
             
             <!-- Citizens Management Modal -->

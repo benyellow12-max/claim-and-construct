@@ -463,10 +463,129 @@ const Resources = {
             Resources.aiClaimBuilding(player, citizens, buildings, foodCritical, foodLow, controlSettings.claimChance);
         }
     },
+
+    getStarterTypeForClaim: (buildingType) => {
+        if (!buildingType) return null;
+
+        const targetDef = CONFIG.BUILDINGS[buildingType];
+        if (!targetDef) return null;
+
+        const targetTier = Buildings.getBuildingTier(buildingType);
+        if (targetTier <= 1) {
+            return buildingType;
+        }
+
+        const progression = CONFIG.BUILDING_PROGRESSION || {};
+        const upgrades = progression.upgrades || {};
+        const parentsByChild = {};
+
+        Object.entries(upgrades).forEach(([parentType, childTypes]) => {
+            if (!Array.isArray(childTypes)) return;
+            childTypes.forEach((childType) => {
+                if (!parentsByChild[childType]) {
+                    parentsByChild[childType] = [];
+                }
+                parentsByChild[childType].push(parentType);
+            });
+        });
+
+        let currentType = buildingType;
+        let safety = 0;
+        while (safety < 20 && Buildings.getBuildingTier(currentType) > 1) {
+            const parents = (parentsByChild[currentType] || [])
+                .filter((parentType) => !!CONFIG.BUILDINGS[parentType])
+                .sort((a, b) => Buildings.getBuildingTier(a) - Buildings.getBuildingTier(b));
+
+            if (parents.length === 0) {
+                return null;
+            }
+
+            currentType = parents[0];
+            safety += 1;
+        }
+
+        return Buildings.getBuildingTier(currentType) === 1 ? currentType : null;
+    },
+
+    isAIStarterClaimType: (buildingType) => {
+        if (!buildingType || !CONFIG.BUILDINGS[buildingType]) return false;
+        if (Buildings.getBuildingTier(buildingType) !== 1) return false;
+
+        const starters = Array.isArray(CONFIG.MAIN_BUILDING_STARTERS)
+            ? CONFIG.MAIN_BUILDING_STARTERS
+            : [];
+
+        return buildingType === 'HQ' || starters.includes(buildingType);
+    },
+
+    getAdultLaborAvailability: (citizens, buildings = []) => {
+        if (!Array.isArray(citizens) || citizens.length === 0) {
+            return { eligibleAdults: 0, unemployedAdults: 0, scavengers: 0 };
+        }
+
+        const eligibleAdults = citizens.filter((citizen) => {
+            const ageGroup = String(citizen?.ageGroup || 'adult').toLowerCase();
+            return ageGroup !== 'child' && ageGroup !== 'elder';
+        });
+
+        if (eligibleAdults.length === 0) {
+            return { eligibleAdults: 0, unemployedAdults: 0, scavengers: 0 };
+        }
+
+        const hasExplicitJobs = eligibleAdults.some((citizen) => Object.prototype.hasOwnProperty.call(citizen, 'job'));
+        if (hasExplicitJobs) {
+            const nonScavengerUnemployed = eligibleAdults.filter((citizen) => {
+                const normalizedJob = String(citizen?.job || '').toLowerCase().trim();
+                if (normalizedJob === 'scavenging') {
+                    return false;
+                }
+                return !citizen.job;
+            }).length;
+            const scavengersCount = eligibleAdults.filter((citizen) => {
+                const normalizedJob = String(citizen?.job || '').toLowerCase().trim();
+                return normalizedJob === 'scavenging';
+            }).length;
+            return { eligibleAdults: eligibleAdults.length, unemployedAdults: nonScavengerUnemployed, scavengers: scavengersCount };
+        }
+
+        const totalJobSlots = (Array.isArray(buildings) ? buildings : []).reduce((sum, building) => {
+            if (building?.jobSlots !== undefined) {
+                return sum + (building.jobSlots || 0);
+            }
+
+            const buildingDef = CONFIG.BUILDINGS[building?.type];
+            return sum + ((buildingDef && buildingDef.jobSlots) || 0);
+        }, 0);
+
+        const employedEstimate = Math.min(eligibleAdults.length, totalJobSlots);
+        const unemployedAdults = Math.max(0, eligibleAdults.length - employedEstimate);
+        return { eligibleAdults: eligibleAdults.length, unemployedAdults, scavengers: 0 };
+    },
     
     aiClaimBuilding: (player, citizens, playerBuildings, foodCritical, foodLow, baseClaimChance) => {
         // Only work with player's buildings
         const buildings = playerBuildings;
+
+        const laborAvailability = Resources.getAdultLaborAvailability(citizens, buildings);
+        const canClaimForJobNeeds = laborAvailability.unemployedAdults > 0;
+
+        const totalJobSlots = buildings.reduce((sum, building) => {
+            if (building?.jobSlots !== undefined) {
+                return sum + (building.jobSlots || 0);
+            }
+            const buildingDef = CONFIG.BUILDINGS[building?.type];
+            return sum + ((buildingDef && buildingDef.jobSlots) || 0);
+        }, 0);
+        const fullJobSlots = laborAvailability.eligibleAdults >= totalJobSlots && totalJobSlots > 0;
+        const canClaimForScavengers = laborAvailability.scavengers > 0 && fullJobSlots;
+
+        if (!canClaimForJobNeeds && !canClaimForScavengers) {
+            console.log(
+                `AI Claim: Skipping claim - no unemployed non-scavenger adults and slots not full (eligible: ${laborAvailability.eligibleAdults}, unemployed: ${laborAvailability.unemployedAdults}, scavengers: ${laborAvailability.scavengers}, job slots: ${totalJobSlots})`
+            );
+            return;
+        }
+
         // Check if HQ exists - if not, prioritize claiming one
         const hqExists = buildings.some(b => b.type === 'HQ');
         
@@ -479,9 +598,23 @@ const Resources = {
         const claimCandidateSet = new Set();
 
         const addCandidate = (type, score) => {
-            if (!type || claimCandidateSet.has(type)) return;
-            claimCandidateSet.add(type);
-            claimCandidates.push({ type, priority: score });
+            if (!type) return;
+
+            const starterType = Resources.getStarterTypeForClaim(type);
+            if (!starterType || !Resources.isAIStarterClaimType(starterType)) {
+                return;
+            }
+
+            if (claimCandidateSet.has(starterType)) {
+                const existing = claimCandidates.find((candidate) => candidate.type === starterType);
+                if (existing && score > existing.priority) {
+                    existing.priority = score;
+                }
+                return;
+            }
+
+            claimCandidateSet.add(starterType);
+            claimCandidates.push({ type: starterType, priority: score });
         };
         
         if (!hqExists) {
@@ -832,6 +965,16 @@ const Resources = {
     
     findAndClaimOSMFeature: (buildingType, player) => {
         const isAIPlayer = !!(player && player.isAI);
+        const requestedType = buildingType;
+
+        const normalizedType = Resources.getStarterTypeForClaim(requestedType);
+        if (isAIPlayer) {
+            if (!normalizedType || !Resources.isAIStarterClaimType(normalizedType)) {
+                return { claimed: false, reason: 'invalid_claim_tier' };
+            }
+            buildingType = normalizedType;
+        }
+
         const allBuildings = Storage.getBuildings();
         const ownedBuildings = allBuildings.filter((building) => {
             if (!Array.isArray(building.location) || building.location.length < 2) return false;
@@ -849,6 +992,9 @@ const Resources = {
         }
 
         console.log(`AI Claim: Searching for ${buildingType} among ${sourceFeatures.length} features`);
+        if (requestedType !== buildingType) {
+            console.log(`AI Claim: Normalized requested ${requestedType} to starter ${buildingType}`);
+        }
 
         const buildingDef = CONFIG.BUILDINGS[buildingType];
         if (!buildingDef || !buildingDef.osmTypes) {
@@ -858,44 +1004,6 @@ const Resources = {
         
         // Get already claimed building OSM IDs
         const claimedIds = new Set(Storage.getBuildings().map(b => String(b.osmId)));
-        
-        // Define which OSM tag keys are relevant for each building type
-        const tagKeysForBuilding = {
-            'HQ': ['building', 'yes'],
-            'HOUSE': ['building', 'yes'],
-            'COTTAGE_BLOCK': ['building'],
-            'APARTMENT_BUILDING': ['building'],
-            'HOSTEL': ['building', 'tourism'],
-            'FARM': ['landuse'],
-            'GATHERING_STATION': ['natural'],
-            'STORAGE': ['building', 'shop'],
-            'STOREHOUSE': ['building'],
-            'ARMORY': ['building'],
-            'GUNSMITH': ['building', 'industrial'],
-            'FORTIFICATION': ['building'],
-            'CASTLE_KEEP': ['building', 'historic'],
-            'RELIGIOUS': ['amenity', 'building'],
-            'WORKSHOP': ['building', 'industrial'],
-            'CLINIC': ['amenity', 'building'],
-            'WATERWORKS': ['man_made', 'building'],
-            'PUMPING_STATION': ['man_made', 'building'],
-            'ENTERTAINMENT': ['amenity'],
-            'NIGHTCLUB': ['amenity'],
-            'BREWERY': ['building'],
-            'COMMUNITY_KITCHEN': ['building'],
-            'MILL': ['building', 'industrial', 'man_made'],
-            'ORCHARD': ['landuse'],
-            'GREENHOUSE': ['building'],
-            'HYDROPONICS_FARM': ['building'],
-            'SEED_DEPOT': ['building'],
-            'BARN_DEPOT': ['building'],
-            'URBAN_GARDEN': ['landuse', 'leisure'],
-            'MARKET_GARDEN': ['amenity'],
-            'NURSERY': ['shop', 'building'],
-        };
-        
-        // Get the relevant tag keys for this building type
-        const relevantKeys = tagKeysForBuilding[buildingType] || [];
         
         // Filter available features that match this building type
         const availableFeatures = sourceFeatures.map((osmFeature) => {
@@ -909,6 +1017,16 @@ const Resources = {
             const tags = osmFeature.tags || {};
             const buildingTag = tags.building ? String(tags.building).toLowerCase() : '';
 
+            if (window.OSMManager && typeof OSMManager.getCompatibleBuildingTypes === 'function') {
+                const compatibleTypes = OSMManager.getCompatibleBuildingTypes(tags);
+                if (Array.isArray(compatibleTypes) && compatibleTypes.includes(buildingType)) {
+                    return {
+                        osmFeature,
+                        matchPriority: 0,
+                    };
+                }
+            }
+
             // building=yes only works for non-strict building definitions
             if (buildingTag === 'yes' && !buildingDef.strictOsmMatch) {
                 return {
@@ -917,15 +1035,9 @@ const Resources = {
                 };
             }
             
-            // Only check relevant tag keys for this building type
-            const matchedTagValues = [];
-            relevantKeys.forEach(key => {
-                if (tags[key]) {
-                    matchedTagValues.push(String(tags[key]).toLowerCase());
-                }
-            });
-            
-            // Check if any matched tag value is in the building's acceptable types
+            // Fallback generic tag scan for environments without OSMManager compatibility helper
+            const matchedTagValues = Object.values(tags).map((value) => String(value).toLowerCase());
+
             const allowedTypes = (buildingDef.osmTypes || []).map(type => String(type).toLowerCase());
             const isMatch = matchedTagValues.some(tagValue => 
                 allowedTypes.includes(tagValue)
@@ -1453,17 +1565,143 @@ const Resources = {
             8,
             aiBuildings.reduce((sum, building) => sum + (building.beds || 0), 0)
         );
-        const simulatedCitizens = Array.from({ length: estimatedCitizens }, (_, idx) => ({
-            id: `ai_citizen_${aiPlayer.name}_${idx}`,
-        }));
+        const simulatedCitizens = Array.from({ length: estimatedCitizens }, (_, idx) => {
+            const mod = idx % 10;
+            const ageGroup = mod < 2 ? 'child' : (mod === 2 ? 'elder' : 'adult');
+            const hasScavengingJob = ageGroup === 'adult' && Math.random() < 0.75;
+            return {
+                id: `ai_citizen_${aiPlayer.name}_${idx}`,
+                ageGroup,
+                job: hasScavengingJob ? 'scavenging' : null,
+            };
+        });
 
         const foodCritical = (aiPlayer.food || 0) < estimatedCitizens * 5;
         const foodLow = (aiPlayer.food || 0) < estimatedCitizens * 30;
+
+        Resources.aiUpgradeBuildings(aiPlayer, aiBuildings, simulatedCitizens, foodCritical, foodLow);
         
         // AI has a chance to claim a new building
         if (Math.random() < expansionChance) {
             Resources.aiClaimBuilding(aiPlayer, simulatedCitizens, aiBuildings, foodCritical, foodLow, expansionChance);
         }
+    },
+
+    aiUpgradeBuildings: (aiPlayer, aiBuildings, simulatedCitizens = [], foodCritical = false, foodLow = false) => {
+        if (!aiPlayer || !Array.isArray(aiBuildings) || aiBuildings.length === 0) {
+            return false;
+        }
+
+        const citizensCount = Array.isArray(simulatedCitizens) ? simulatedCitizens.length : 0;
+        const totalBeds = aiBuildings.reduce((sum, building) => sum + (building.beds || 0), 0);
+        const bedsTight = citizensCount > 0 ? totalBeds <= citizensCount : false;
+        const seedsLow = (aiPlayer.seeds || 0) < Math.max(30, citizensCount * 4);
+
+        const foodTypes = new Set([
+            'COMMUNITY_KITCHEN', 'FIELD_KITCHEN', 'FARM', 'SMOKEHOUSE', 'ORCHARD', 'MILL', 'GREENHOUSE', 'CANNERY', 'HYDROPONICS_FARM', 'AQUAPONICS_LAB',
+        ]);
+        const seedTypes = new Set([
+            'SEED_DEPOT', 'BARN_DEPOT', 'SEED_BANK', 'URBAN_GARDEN', 'PROPAGATION_HOUSE', 'MARKET_GARDEN', 'AGRONOMY_CENTER', 'NURSERY', 'GENETIC_SEED_VAULT',
+        ]);
+        const residentialTypes = new Set([
+            'HOUSE', 'COTTAGE_BLOCK', 'ROW_HOUSING', 'TENEMENT', 'HOSTEL', 'RESIDENTIAL_COMPLEX', 'APARTMENT_BUILDING', 'HIGH_RISE_TOWER',
+        ]);
+        const militaryTypes = new Set([
+            'ARMORY', 'TRAINING_GROUNDS', 'GUNSMITH', 'MUNITIONS_FACTORY', 'WAR_COLLEGE',
+        ]);
+        const fortTypes = new Set([
+            'FORTIFICATION', 'PALISADE', 'CASTLE_KEEP', 'BASTION', 'CITADEL',
+        ]);
+
+        const upgradeCandidates = [];
+
+        aiBuildings.forEach((building) => {
+            const options = Buildings.getUpgradeOptions(building);
+            options.forEach((option) => {
+                if ((aiPlayer.scrap || 0) < (option.scrapCost || 0)) return;
+                if ((aiPlayer.tools || 0) < (option.toolCost || 0)) return;
+
+                let score = option.tier * 10;
+
+                if ((foodCritical || foodLow) && foodTypes.has(option.type)) {
+                    score += 30;
+                }
+                if (seedsLow && seedTypes.has(option.type)) {
+                    score += 18;
+                }
+                if (bedsTight && residentialTypes.has(option.type)) {
+                    score += 24;
+                }
+
+                if ((aiPlayer.soldiers || 0) > 8 && (militaryTypes.has(option.type) || fortTypes.has(option.type))) {
+                    score += 8;
+                }
+
+                const affordabilityFactor = ((aiPlayer.scrap || 0) - (option.scrapCost || 0)) + (((aiPlayer.tools || 0) - (option.toolCost || 0)) * 8);
+                score += Math.max(0, affordabilityFactor / 40);
+
+                upgradeCandidates.push({
+                    building,
+                    option,
+                    score,
+                });
+            });
+        });
+
+        if (upgradeCandidates.length === 0) {
+            return false;
+        }
+
+        upgradeCandidates.sort((a, b) => b.score - a.score);
+        const chosen = upgradeCandidates[0];
+        if (!chosen || !chosen.building || !chosen.option) {
+            return false;
+        }
+
+        const targetDef = CONFIG.BUILDINGS[chosen.option.type];
+        if (!targetDef) {
+            return false;
+        }
+
+        aiPlayer.scrap = Math.max(0, (aiPlayer.scrap || 0) - (chosen.option.scrapCost || 0));
+        aiPlayer.tools = Math.max(0, (aiPlayer.tools || 0) - (chosen.option.toolCost || 0));
+
+        const baseJobSlots = targetDef.jobSlots || 0;
+        const baseStorage = targetDef.storageCapacity || 0;
+        const tierDefenseBonus = (chosen.option.tier - 1) * 35;
+        const tierJobBonus = chosen.option.tier >= 4 ? 1 : 0;
+        const tierStorageBonus = chosen.option.tier >= 3 ? (chosen.option.tier - 2) * 30 : 0;
+
+        const updatedBuilding = {
+            ...chosen.building,
+            type: chosen.option.type,
+            level: chosen.option.tier,
+            defense: Math.max(chosen.building.defense || 0, (targetDef.defense ?? chosen.building.defense) + tierDefenseBonus),
+            storage: Math.max(chosen.building.storage || 0, baseStorage + tierStorageBonus),
+            jobSlots: Math.max(chosen.building.jobSlots || 0, baseJobSlots + tierJobBonus),
+            religion: chosen.option.type === 'RELIGIOUS'
+                ? (chosen.building.religion || aiPlayer.stateReligion || CONFIG.DEMOGRAPHICS.religions[0])
+                : null,
+        };
+
+        if (targetDef.bedsMin !== undefined && targetDef.bedsMax !== undefined) {
+            const currentBeds = chosen.building.beds || targetDef.bedsMin;
+            updatedBuilding.beds = Math.min(targetDef.bedsMax, Math.max(targetDef.bedsMin, currentBeds));
+        } else {
+            updatedBuilding.beds = 0;
+        }
+
+        Storage.updateBuilding(chosen.building.id, updatedBuilding);
+
+        if (MapManager && MapManager.buildingLayer) {
+            MapManager.loadBuildings();
+        }
+        if (OSMManager && OSMManager.osmLayer) {
+            OSMManager.osmLayer.changed();
+        }
+
+        Game.addLog(`${aiPlayer.name} upgraded ${chosen.building.name} to ${targetDef.name}.`, 'info');
+        return true;
     },
 
     ensureAIOsmFeatures: (aiPlayer, aiBuildings = []) => {
